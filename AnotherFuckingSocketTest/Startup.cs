@@ -1,5 +1,12 @@
+using System;
+using System.Net.WebSockets;
+using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
+using BridgeSocket.AspNetCoreServer;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.HttpsPolicy;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SpaServices.AngularCli;
@@ -53,7 +60,33 @@ namespace AnotherFuckingSocketTest
                     name: "default",
                     template: "{controller}/{action=Index}/{id?}");
             });
+            var wsOptions = new WebSocketOptions()
+            {
+                KeepAliveInterval = TimeSpan.FromMinutes(2),
+                ReceiveBufferSize = 1024 * 4
+            };
 
+            app.UseWebSockets(wsOptions);
+            app.Use(async (context, next) =>
+            {
+                if (context.Request.Path == "/socket.io" || context.Request.Path == "/socket.io/")
+                {
+                    if (context.WebSockets.IsWebSocketRequest)
+                    {
+                        WebSocket webSocket = await context.WebSockets.AcceptWebSocketAsync();
+                        await Echo(context, webSocket);
+                    }
+                    else
+                    {
+                        context.Response.StatusCode = 400;
+                    }
+                }
+                else
+                {
+                    await next();
+                }
+
+            });
             app.UseSpa(spa =>
             {
                 // To learn more about options for serving an Angular SPA from ASP.NET Core,
@@ -66,6 +99,21 @@ namespace AnotherFuckingSocketTest
                     spa.UseAngularCliServer(npmScript: "start");
                 }
             });
+        }
+        private async Task Echo(HttpContext context, WebSocket webSocket)
+        {
+            var buffer = new byte[1024 * 4];
+            WebSocketReceiveResult result = await webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), CancellationToken.None);
+            while (!result.CloseStatus.HasValue)
+            {
+                //await webSocket.SendAsync(new ArraySegment<byte>(buffer, 0, result.Count), result.MessageType, result.EndOfMessage, CancellationToken.None);
+                var encoded = Encoding.UTF8.GetBytes("biscoito");
+                var bufferSend = new ArraySegment<byte>(encoded, 0, encoded.Length);
+                await webSocket.SendAsync(bufferSend, result.MessageType, result.EndOfMessage, CancellationToken.None);
+
+                result = await webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), CancellationToken.None);
+            }
+            await webSocket.CloseAsync(result.CloseStatus.Value, result.CloseStatusDescription, CancellationToken.None);
         }
     }
 }
